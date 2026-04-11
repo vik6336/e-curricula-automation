@@ -1,0 +1,35 @@
+# E-Curricula Automation Settings
+
+course:
+  code: "21CSE597T"
+  name: "CONTAINERS AND CLOUD DEVOPS"
+  num_modules: 5
+  sessions_per_module: 9
+  slos_per_session: 2
+
+gemini:
+  model: "gemini-flash-latest"
+  temperature: 0.35
+  max_output_tokens: 8192
+  rate_limit_delay_seconds: 2
+
+ppt:
+  slide_width_inches: 13.333
+  slide_height_inches: 7.5
+  font_family: "Calibri"
+  color_primary: "#1B365D"    # Navy
+  color_accent: "#C8102E"     # SRM Maroon
+  color_background: "#FFFFFF"
+  min_slides_per_slo: 8
+  max_slides_per_slo: 12
+
+pdf:
+  page_size: "A4"
+  font_family: "Helvetica"
+  margin_inches: 1.0
+
+paths:
+  input_dir: "input"
+  output_dir: "output"
+  slo_document: "input/SLO_SRO_Containers_Cloud_DevOps.docx"
+  syllabus: "input/Containers_and_devops_syllabus.pdf"

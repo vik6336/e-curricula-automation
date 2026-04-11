@@ -1,0 +1,29 @@
+# Multi-stage: use full Alpine to get Python, then copy into n8n
+FROM alpine:3.23 AS python-builder
+
+RUN apk add --no-cache python3 py3-pip python3-dev gcc musl-dev libffi-dev && \
+    pip3 install --break-system-packages --prefix=/python-install \
+    google-generativeai \
+    python-dotenv \
+    python-docx \
+    pdfplumber \
+    python-pptx \
+    reportlab \
+    PyYAML \
+    beautifulsoup4 \
+    requests
+
+FROM n8nio/n8n:latest
+
+USER root
+
+# Copy Python runtime from Alpine
+COPY --from=python-builder /usr/bin/python3* /usr/bin/
+COPY --from=python-builder /usr/lib/python3* /usr/lib/python3.12/
+COPY --from=python-builder /usr/lib/libpython3* /usr/lib/
+COPY --from=python-builder /python-install/lib /usr/lib/
+
+# Make python3 accessible
+RUN ln -sf /usr/bin/python3.12 /usr/bin/python3 2>/dev/null || true
+
+USER node
