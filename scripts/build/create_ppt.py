@@ -5,20 +5,33 @@ import sys
 from pathlib import Path
 
 from .ppt_styles import (
-    add_content_slide,
-    add_summary_slide,
     add_title_slide,
+    add_what_slide,
+    add_why_slide,
+    add_how_slide,
+    add_diagram_slide,
+    add_code_slide,
+    add_use_case_slide,
+    add_quiz_slide,
+    add_summary_slide,
+    add_content_slide,
     create_presentation,
 )
 
+_SLIDE_BUILDERS = {
+    "title":    add_title_slide,
+    "what":     add_what_slide,
+    "why":      add_why_slide,
+    "how":      add_how_slide,
+    "diagram":  add_diagram_slide,
+    "code":     add_code_slide,
+    "use_case": add_use_case_slide,
+    "quiz":     add_quiz_slide,
+    "summary":  add_summary_slide,
+}
 
-def create_slo_ppt(
-    slo_data: dict,
-    module_num: int,
-    session_num: int,
-    slo_num: int,
-    output_path: str,
-) -> str:
+
+def create_slo_ppt(slo_data, module_num, session_num, slo_num, output_path):
     """Create a PPTX file for a single SLO.
 
     Args:
@@ -32,40 +45,19 @@ def create_slo_ppt(
         Path to the created file
     """
     prs = create_presentation()
-    slides = slo_data.get("slides", [])
-    slo_title = slo_data.get("slo_title", f"SLO {slo_num}")
 
-    for slide_data in slides:
+    for slide_data in slo_data.get("slides", []):
         slide_type = slide_data.get("slide_type", "content")
-        title = slide_data.get("title", "")
-        subtitle = slide_data.get("subtitle", "")
-        bullets = slide_data.get("bullet_points", [])
-        notes = slide_data.get("speaker_notes", "")
+        builder = _SLIDE_BUILDERS.get(slide_type, add_content_slide)
+        builder(prs, slide_data, module_num, session_num, slo_num)
 
-        if slide_type == "title":
-            add_title_slide(
-                prs, title or slo_title, subtitle or slo_data.get("slo_title", ""),
-                module_num, session_num, slo_num,
-            )
-        elif slide_type == "summary":
-            add_summary_slide(
-                prs, bullets, notes,
-                module_num, session_num, slo_num,
-            )
-        else:
-            add_content_slide(
-                prs, title, bullets, notes,
-                module_num, session_num, slo_num,
-            )
-
-    # Save
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(output))
     return str(output)
 
 
-def create_module_ppts(module_content: dict, output_dir: str) -> list[str]:
+def create_module_ppts(module_content, output_dir):
     """Create all 18 PPTX files for a module.
 
     Args:
@@ -80,10 +72,10 @@ def create_module_ppts(module_content: dict, output_dir: str) -> list[str]:
 
     for slo_item in module_content["slo_contents"]:
         session_num = slo_item["session_num"]
-        slo_num = slo_item["slo_num"]
-        content = slo_item["content"]
+        slo_num     = slo_item["slo_num"]
+        content     = slo_item["content"]
 
-        filename = f"session_{session_num}_slo_{slo_num}.pptx"
+        filename    = f"session_{session_num}_slo_{slo_num}.pptx"
         output_path = Path(output_dir) / f"unit_{module_num}" / "ppts" / filename
 
         path = create_slo_ppt(
@@ -100,9 +92,9 @@ def create_module_ppts(module_content: dict, output_dir: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    """Usage: python -m scripts.build.create_ppt <content_json_path> <output_dir>"""
     if len(sys.argv) < 3:
-        print("Usage: python -m scripts.build.create_ppt <content_json> <output_dir>", file=sys.stderr)
+        print("Usage: python -m scripts.build.create_ppt <content_json> <output_dir>",
+              file=sys.stderr)
         sys.exit(1)
 
     with open(sys.argv[1]) as f:

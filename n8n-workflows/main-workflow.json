@@ -1,174 +1,293 @@
 {
-  "name": "E-Curricula Full Automation Pipeline",
+  "name": "CurriculAI — Full Automation Pipeline",
   "nodes": [
     {
-      "parameters": {},
-      "id": "trigger-1",
-      "name": "Start Pipeline",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
-      "position": [240, 560]
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-curriculum",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "📥 Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "webhookId": "curricul-ai-trigger"
     },
     {
       "parameters": {
-        "jsCode": "// ═══════════════════════════════════════════════\n// PIPELINE CONFIGURATION\n// ═══════════════════════════════════════════════\nconst config = {\n  course_code: '21CSE597T',\n  course_name: 'CONTAINERS AND CLOUD DEVOPS',\n  modules_to_process: [1],\n  project_path: '/data/e-curricula',\n  skip_upload: true,\n  gemini_model: 'gemini-flash-latest',\n  settings: {\n    temperature: 0.35,\n    max_output_tokens: 8192,\n    rate_limit_delay: 2,\n    ppt_format: '16:9 Widescreen',\n    pdf_format: 'A4',\n    slides_per_slo: '8-12'\n  }\n};\n\nreturn [{ json: config }];"
+        "jsCode": "const body = $input.first().json.body || {};\nconst modules = body.modules || [1, 2, 3, 4, 5];\nconst slo_filename = body.slo_filename || 'SLO_SRO_Containers_Cloud_DevOps.docx';\n\nreturn [{\n  json: {\n    modules: modules,\n    modules_str: modules.join(','),\n    slo_filename: slo_filename,\n    started_at: new Date().toISOString(),\n    api_base: 'http://localhost:8000'\n  }\n}];"
       },
-      "id": "config-1",
-      "name": "⚙️ Configuration",
+      "id": "config-node",
+      "name": "⚙️ Extract Config",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 560]
+      "position": [500, 400]
     },
     {
       "parameters": {
-        "command": "cd /data/e-curricula && python3 -c \"\nimport json, sys\nsys.path.insert(0, '.')\nfrom scripts.ingest.parse_slo_document import parse_slo_document, validate_parsed_data\n\nslo = parse_slo_document('input/SLO_SRO_Containers_Cloud_DevOps.docx')\nerrors = validate_parsed_data(slo)\n\nresult = {'status': 'success', 'modules': {}}\nif errors:\n    result = {'status': 'error', 'errors': errors}\nelse:\n    for key, mod in slo.items():\n        result['modules'][key] = {\n            'title': mod['title'],\n            'sessions': len(mod['sessions']),\n            'total_slos': len(mod['sessions']) * 2\n        }\n\nprint(json.dumps(result))\n\""
+        "method": "POST",
+        "url": "={{ $json.api_base }}/api/generate",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "modules",
+              "value": "={{ $json.modules_str }}"
+            }
+          ]
+        },
+        "options": { "timeout": 10000 }
       },
-      "id": "parse-slo",
-      "name": "📄 Parse SLO/SRO Document",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [720, 400]
+      "id": "start-generation",
+      "name": "🚀 Start Generation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 400]
     },
     {
       "parameters": {
-        "command": "cd /data/e-curricula && python3 -c \"\nimport json, sys\nsys.path.insert(0, '.')\nfrom scripts.ingest.extract_text import extract_all_sources, extract_from_pdf\n\nsources = extract_all_sources('input/source_docs')\n\ntry:\n    syllabus = extract_from_pdf('input/Containers_and_devops_syllabus.pdf')\n    syl_len = len(syllabus)\nexcept:\n    syl_len = 0\n\nresult = {'status': 'success', 'units': {}}\nfor unit, texts in sources.items():\n    total_chars = sum(len(t['text']) for t in texts)\n    result['units'][unit] = {'sources': len(texts), 'chars': total_chars}\nresult['syllabus_chars'] = syl_len\n\nprint(json.dumps(result))\n\""
+        "jsCode": "const job_id = $input.first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\n\nif (!job_id) throw new Error('No job_id returned from generate endpoint');\n\nreturn [{\n  json: {\n    job_id: job_id,\n    api_base: api_base,\n    poll_url: `${api_base}/api/status/${job_id}`,\n    check_count: 0\n  }\n}];"
       },
-      "id": "extract-docs",
-      "name": "📚 Extract Source Documents",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [720, 720]
-    },
-    {
-      "parameters": {
-        "jsCode": "const sloResult = JSON.parse($('📄 Parse SLO/SRO Document').first().json.stdout);\nconst sourceResult = JSON.parse($('📚 Extract Source Documents').first().json.stdout);\nconst config = $('⚙️ Configuration').first().json;\n\nif (sloResult.status === 'error') {\n  throw new Error('SLO parsing failed: ' + JSON.stringify(sloResult.errors));\n}\n\n// Create one item per module for the loop\nconst items = [];\nfor (const moduleNum of config.modules_to_process) {\n  const moduleKey = `module_${moduleNum}`;\n  const moduleInfo = sloResult.modules[moduleKey];\n  \n  if (!moduleInfo) continue;\n  \n  items.push({\n    json: {\n      module_num: moduleNum,\n      module_key: moduleKey,\n      module_title: moduleInfo.title,\n      total_sessions: moduleInfo.sessions,\n      total_slos: moduleInfo.total_slos,\n      source_info: sourceResult.units[`unit_${moduleNum}`] || { sources: 0, chars: 0 },\n      project_path: config.project_path\n    }\n  });\n}\n\nreturn items;"
-      },
-      "id": "merge-validate",
-      "name": "✅ Validate & Split Modules",
+      "id": "store-job",
+      "name": "📝 Store Job ID",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1000, 560]
+      "position": [1020, 400]
     },
     {
       "parameters": {
-        "command": "={{ 'cd /data/e-curricula && python3 -c \"\\nimport json, sys, os\\nos.environ[\\\"GEMINI_API_KEY\\\"] = os.environ.get(\\\"GEMINI_API_KEY\\\", \\\"\\\")\\nsys.path.insert(0, \\\".\\\")\\nfrom scripts.ingest.parse_slo_document import parse_slo_document\\nfrom scripts.ingest.extract_text import extract_all_sources, extract_from_pdf\\nfrom scripts.generate.gemini_content_gen import init_gemini, generate_module_content\\n\\nslo = parse_slo_document(\\\"input/SLO_SRO_Containers_Cloud_DevOps.docx\\\")\\nsources = extract_all_sources(\\\"input/source_docs\\\")\\ntry:\\n    syllabus = extract_from_pdf(\\\"input/Containers_and_devops_syllabus.pdf\\\")\\nexcept:\\n    syllabus = \\\"\\\"\\n\\nmodule_num = ' + $json.module_num + '\\nmodule_key = \\\"module_' + $json.module_num + '\\\"\\nmodel = init_gemini()\\nunit_sources = sources.get(\\\"unit_' + $json.module_num + '\\\", [])\\n\\ncontent = generate_module_content(\\n    model=model,\\n    module_num=module_num,\\n    module_data=slo[module_key],\\n    source_texts=unit_sources,\\n    syllabus_context=syllabus\\n)\\n\\nimport pathlib\\nout_dir = pathlib.Path(\\\"output/21CSE597T/unit_\\\" + str(module_num))\\nout_dir.mkdir(parents=True, exist_ok=True)\\nwith open(out_dir / \\\"content.json\\\", \\\"w\\\") as f:\\n    json.dump(content, f, indent=2)\\n\\nprint(json.dumps({\\\"status\\\": \\\"success\\\", \\\"module\\\": module_num, \\\"slos_generated\\\": len(content[\\\"slo_contents\\\"]), \\\"content_path\\\": str(out_dir / \\\"content.json\\\")}))\\n\"' }}",
-        "timeout": 600
+        "amount": 30,
+        "unit": "seconds"
       },
-      "id": "gemini-gen",
-      "name": "🤖 Generate Content (Gemini)",
-      "type": "n8n-nodes-base.executeCommand",
+      "id": "wait-node",
+      "name": "⏳ Wait 30s",
+      "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [1280, 560]
+      "position": [1280, 400]
     },
     {
       "parameters": {
-        "jsCode": "const genResult = JSON.parse($input.first().json.stdout);\nconst config = $('⚙️ Configuration').first().json;\n\nif (genResult.status !== 'success') {\n  throw new Error('Content generation failed for module ' + genResult.module);\n}\n\nreturn [{\n  json: {\n    ...genResult,\n    project_path: config.project_path\n  }\n}];"
+        "method": "GET",
+        "url": "={{ $('📝 Store Job ID').first().json.poll_url }}",
+        "options": { "timeout": 15000 }
       },
-      "id": "parse-gen-result",
-      "name": "📊 Parse Generation Result",
+      "id": "poll-status",
+      "name": "🔍 Poll Job Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1540, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw === 'string' ? raw : JSON.stringify(raw);\nconst lines = body.split('\\n');\nlet status = 'running';\nlet lastLog = '';\n\nfor (const line of lines) {\n  if (line.startsWith('data: ')) {\n    try {\n      const event = JSON.parse(line.slice(6));\n      if (event.type === 'status') status = event.status;\n      if (event.type === 'log') lastLog = event.line;\n    } catch(_) {}\n  }\n}\n\nconst job_id = $('📝 Store Job ID').first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\n\nreturn [{\n  json: {\n    status,\n    last_log: lastLog,\n    job_id,\n    api_base,\n    poll_url: `${api_base}/api/status/${job_id}`\n  }\n}];"
+      },
+      "id": "parse-status",
+      "name": "📊 Parse Status",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1540, 560]
-    },
-    {
-      "parameters": {
-        "command": "={{ 'cd /data/e-curricula && python3 -c \"\\nimport json, sys\\nsys.path.insert(0, \\\".\\\")\\nfrom scripts.build.create_ppt import create_module_ppts\\n\\nwith open(\\\"' + $json.content_path + '\\\") as f:\\n    content = json.load(f)\\n\\nout_dir = \\\"output/21CSE597T\\\"\\nppt_files = create_module_ppts(content, out_dir)\\n\\nprint(json.dumps({\\\"status\\\": \\\"success\\\", \\\"module\\\": ' + $json.module + ', \\\"ppts_created\\\": len(ppt_files), \\\"files\\\": ppt_files}))\\n\"' }}",
-        "timeout": 120
-      },
-      "id": "build-ppt",
-      "name": "📊 Build PPTX Files (18 per module)",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
       "position": [1800, 400]
     },
     {
       "parameters": {
-        "command": "={{ 'cd /data/e-curricula && python3 -c \"\\nimport json, sys\\nsys.path.insert(0, \\\".\\\")\\nfrom scripts.build.create_pdf import create_module_pdf\\n\\nwith open(\\\"' + $json.content_path + '\\\") as f:\\n    content = json.load(f)\\n\\nmodule_num = ' + $json.module + '\\npdf_path = \\\"output/21CSE597T/unit_\\\" + str(module_num) + \\\"/unit_\\\" + str(module_num) + \\\"_learning_material.pdf\\\"\\ncreate_module_pdf(content[\\\"pdf_content\\\"], module_num, pdf_path)\\n\\nprint(json.dumps({\\\"status\\\": \\\"success\\\", \\\"module\\\": module_num, \\\"pdf_path\\\": pdf_path}))\\n\"' }}",
-        "timeout": 120
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            {
+              "id": "cond-done",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "done",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "build-pdf",
-      "name": "📝 Build Learning Material PDF",
-      "type": "n8n-nodes-base.executeCommand",
-      "typeVersion": 1,
-      "position": [1800, 720]
+      "id": "check-done",
+      "name": "✅ Done?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2060, 300]
     },
     {
       "parameters": {
-        "jsCode": "const pptResult = JSON.parse($('📊 Build PPTX Files (18 per module)').first().json.stdout);\nconst pdfResult = JSON.parse($('📝 Build Learning Material PDF').first().json.stdout);\n\nreturn [{\n  json: {\n    module: pptResult.module,\n    ppts_created: pptResult.ppts_created,\n    pdf_created: pdfResult.status === 'success',\n    pdf_path: pdfResult.pdf_path,\n    status: 'files_ready'\n  }\n}];"
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            {
+              "id": "cond-error",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "error",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
       },
-      "id": "merge-files",
-      "name": "📦 Merge Build Results",
+      "id": "check-error",
+      "name": "❌ Error?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2060, 560]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('⚙️ Extract Config').first().json.api_base }}/api/modules",
+        "options": {}
+      },
+      "id": "get-modules",
+      "name": "📂 Get Module Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2320, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const modules = $input.first().json;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst ready = modules.filter(m => m.ppt_count > 0);\n\nreturn ready.map(m => ({\n  json: {\n    module_num: m.module,\n    ppt_count: m.ppt_count,\n    has_pdf: m.has_pdf,\n    api_base: api_base,\n    download_url: `${api_base}/api/download/${m.module}`\n  }\n}));"
+      },
+      "id": "split-modules",
+      "name": "🔀 Split Per Module",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2080, 560]
+      "position": [2580, 200]
     },
     {
       "parameters": {
-        "jsCode": "const config = $('⚙️ Configuration').first().json;\nconst buildResult = $input.first().json;\n\nif (config.skip_upload) {\n  return [{\n    json: {\n      module: buildResult.module,\n      status: 'upload_skipped',\n      message: 'Upload skipped — set skip_upload=false and add portal credentials to enable',\n      ppts_created: buildResult.ppts_created,\n      pdf_created: buildResult.pdf_created\n    }\n  }];\n}\n\n// If upload is enabled, this would call the portal upload script\nreturn [{\n  json: {\n    module: buildResult.module,\n    status: 'ready_for_upload',\n    ppts_created: buildResult.ppts_created,\n    pdf_created: buildResult.pdf_created\n  }\n}];"
+        "method": "GET",
+        "url": "={{ $json.download_url }}",
+        "options": {
+          "response": {
+            "response": { "responseFormat": "file" }
+          }
+        }
       },
-      "id": "upload-check",
-      "name": "🌐 Portal Upload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [2340, 560]
+      "id": "download-module",
+      "name": "⬇️ Download Module ZIP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2840, 200]
     },
     {
       "parameters": {
-        "jsCode": "const results = $input.all().map(item => item.json);\n\nlet totalPpts = 0;\nlet totalPdfs = 0;\nconst moduleResults = [];\n\nfor (const r of results) {\n  totalPpts += r.ppts_created || 0;\n  totalPdfs += r.pdf_created ? 1 : 0;\n  moduleResults.push({\n    module: r.module,\n    ppts: r.ppts_created,\n    pdf: r.pdf_created,\n    upload: r.status\n  });\n}\n\nreturn [{\n  json: {\n    pipeline_status: 'COMPLETE',\n    course: '21CSE597T — Containers and Cloud DevOps',\n    total_pptx_files: totalPpts,\n    total_pdf_files: totalPdfs,\n    total_files: totalPpts + totalPdfs,\n    modules_processed: moduleResults,\n    output_directory: '/data/e-curricula/output/21CSE597T/',\n    timestamp: new Date().toISOString()\n  }\n}];"
+        "mode": "append",
+        "options": {}
       },
-      "id": "summary",
+      "id": "merge-results",
+      "name": "🗂️ Merge All ZIPs",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [3100, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst started_at = $('⚙️ Extract Config').first().json.started_at;\nconst finished_at = new Date().toISOString();\nconst total_ppts = items.reduce((sum, i) => sum + (i.json.ppt_count || 0), 0);\nconst total_pdfs = items.filter(i => i.json.has_pdf).length;\n\nreturn [{\n  json: {\n    status: 'complete',\n    summary: {\n      modules_processed: items.length,\n      total_ppts_generated: total_ppts,\n      total_pdfs_generated: total_pdfs,\n      download_all_url: `${api_base}/api/download`,\n      started_at,\n      finished_at\n    },\n    message: `CurriculAI complete! ${total_ppts} PPTs and ${total_pdfs} PDFs generated across ${items.length} modules.`\n  }\n}];"
+      },
+      "id": "summary-node",
       "name": "📋 Pipeline Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2600, 560]
+      "position": [3360, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": { "responseCode": 200 }
+      },
+      "id": "respond-success",
+      "name": "✅ Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3620, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    status: 'error',\n    message: 'Pipeline failed. Check FastAPI logs.',\n    job_id: $json.job_id,\n    last_log: $json.last_log\n  }\n}];"
+      },
+      "id": "error-node",
+      "name": "🚨 Handle Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2320, 640]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": { "responseCode": 500 }
+      },
+      "id": "respond-error",
+      "name": "❌ Respond Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2580, 640]
     }
   ],
   "connections": {
-    "Start Pipeline": {
-      "main": [[{ "node": "⚙️ Configuration", "type": "main", "index": 0 }]]
+    "📥 Webhook Trigger": {
+      "main": [[{ "node": "⚙️ Extract Config", "type": "main", "index": 0 }]]
     },
-    "⚙️ Configuration": {
+    "⚙️ Extract Config": {
+      "main": [[{ "node": "🚀 Start Generation", "type": "main", "index": 0 }]]
+    },
+    "🚀 Start Generation": {
+      "main": [[{ "node": "📝 Store Job ID", "type": "main", "index": 0 }]]
+    },
+    "📝 Store Job ID": {
+      "main": [[{ "node": "⏳ Wait 30s", "type": "main", "index": 0 }]]
+    },
+    "⏳ Wait 30s": {
+      "main": [[{ "node": "🔍 Poll Job Status", "type": "main", "index": 0 }]]
+    },
+    "🔍 Poll Job Status": {
+      "main": [[{ "node": "📊 Parse Status", "type": "main", "index": 0 }]]
+    },
+    "📊 Parse Status": {
       "main": [
-        [
-          { "node": "📄 Parse SLO/SRO Document", "type": "main", "index": 0 },
-          { "node": "📚 Extract Source Documents", "type": "main", "index": 0 }
-        ]
+        [{ "node": "✅ Done?", "type": "main", "index": 0 }],
+        [{ "node": "❌ Error?", "type": "main", "index": 0 }]
       ]
     },
-    "📄 Parse SLO/SRO Document": {
-      "main": [[{ "node": "✅ Validate & Split Modules", "type": "main", "index": 0 }]]
-    },
-    "📚 Extract Source Documents": {
-      "main": [[{ "node": "✅ Validate & Split Modules", "type": "main", "index": 0 }]]
-    },
-    "✅ Validate & Split Modules": {
-      "main": [[{ "node": "🤖 Generate Content (Gemini)", "type": "main", "index": 0 }]]
-    },
-    "🤖 Generate Content (Gemini)": {
-      "main": [[{ "node": "📊 Parse Generation Result", "type": "main", "index": 0 }]]
-    },
-    "📊 Parse Generation Result": {
+    "✅ Done?": {
       "main": [
-        [
-          { "node": "📊 Build PPTX Files (18 per module)", "type": "main", "index": 0 },
-          { "node": "📝 Build Learning Material PDF", "type": "main", "index": 0 }
-        ]
+        [{ "node": "📂 Get Module Info", "type": "main", "index": 0 }],
+        [{ "node": "⏳ Wait 30s", "type": "main", "index": 0 }]
       ]
     },
-    "📊 Build PPTX Files (18 per module)": {
-      "main": [[{ "node": "📦 Merge Build Results", "type": "main", "index": 0 }]]
+    "❌ Error?": {
+      "main": [
+        [{ "node": "🚨 Handle Error", "type": "main", "index": 0 }],
+        [{ "node": "⏳ Wait 30s", "type": "main", "index": 0 }]
+      ]
     },
-    "📝 Build Learning Material PDF": {
-      "main": [[{ "node": "📦 Merge Build Results", "type": "main", "index": 0 }]]
+    "📂 Get Module Info": {
+      "main": [[{ "node": "🔀 Split Per Module", "type": "main", "index": 0 }]]
     },
-    "📦 Merge Build Results": {
-      "main": [[{ "node": "🌐 Portal Upload", "type": "main", "index": 0 }]]
+    "🔀 Split Per Module": {
+      "main": [[{ "node": "⬇️ Download Module ZIP", "type": "main", "index": 0 }]]
     },
-    "🌐 Portal Upload": {
+    "⬇️ Download Module ZIP": {
+      "main": [[{ "node": "🗂️ Merge All ZIPs", "type": "main", "index": 0 }]]
+    },
+    "🗂️ Merge All ZIPs": {
       "main": [[{ "node": "📋 Pipeline Summary", "type": "main", "index": 0 }]]
+    },
+    "📋 Pipeline Summary": {
+      "main": [[{ "node": "✅ Respond Success", "type": "main", "index": 0 }]]
+    },
+    "🚨 Handle Error": {
+      "main": [[{ "node": "❌ Respond Error", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
-    "executionOrder": "v1"
-  }
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": ["curricul-ai", "automation", "education"]
 }

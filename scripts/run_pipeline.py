@@ -96,25 +96,34 @@ def run_pipeline(modules_to_process: list[int] = None, skip_upload: bool = True)
             module_data=slo_data[module_key],
             source_texts=unit_sources,
             syllabus_context=syllabus_text,
+            output_dir=str(output_dir),
         )
 
-        # Save raw content JSON for debugging/reuse
+        # Save raw content JSON
         content_json_path = output_dir / f"unit_{module_num}" / "content.json"
         content_json_path.parent.mkdir(parents=True, exist_ok=True)
         with open(content_json_path, "w") as f:
             json.dump(module_content, f, indent=2)
         print(f"  Saved content JSON: {content_json_path}")
 
-        # --- Step 4: Generate PPT files ---
+        # --- Step 4: Generate PPT files (before PDF so they're always saved) ---
         print(f"\n  Generating PPT files for Module {module_num}...")
         ppt_files = create_module_ppts(module_content, str(output_dir))
         print(f"  Created {len(ppt_files)} PPT files")
 
+        # Remove checkpoint now that PPTs are saved
+        checkpoint = output_dir / f"unit_{module_num}" / "slo_checkpoint.json"
+        if checkpoint.exists():
+            checkpoint.unlink()
+
         # --- Step 5: Generate PDF ---
         print(f"\n  Generating PDF for Module {module_num}...")
         pdf_path = output_dir / f"unit_{module_num}" / f"unit_{module_num}_learning_material.pdf"
-        create_module_pdf(module_content["pdf_content"], module_num, str(pdf_path))
-        print(f"  Created PDF: {pdf_path}")
+        try:
+            create_module_pdf(module_content["pdf_content"], module_num, str(pdf_path))
+            print(f"  Created PDF: {pdf_path}")
+        except Exception as e:
+            print(f"  WARNING: PDF creation failed ({e}). PPTs are saved.", file=sys.stderr)
 
     # --- Step 6: Upload (optional) ---
     if not skip_upload:
