@@ -262,7 +262,7 @@ async def _run_pipeline(job_id: str, module_list: list[str], slo_path: Optional[
 
 @app.get("/api/job/{job_id}", dependencies=[Depends(require_api_key)])
 async def job_status(job_id: str):
-    """Plain JSON poll endpoint for n8n."""
+    """Plain JSON poll endpoint for job status."""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
     job = jobs[job_id]
@@ -276,7 +276,7 @@ async def job_status(job_id: str):
 
 @app.get("/api/status/{job_id}", dependencies=[Depends(require_api_key)])
 async def stream_status(job_id: str):
-    """SSE stream for the React UI (not used by n8n)."""
+    """SSE stream of job progress for the React UI."""
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -399,7 +399,7 @@ async def upload_decision(upload_job_id: str, body: dict):
 
 @app.get("/api/upload-job/{upload_job_id}", dependencies=[Depends(require_api_key)])
 async def upload_job_status(upload_job_id: str):
-    """Poll upload job status — used by n8n and the React UI."""
+    """Poll upload job status — used by the React UI."""
     if upload_job_id not in upload_jobs:
         raise HTTPException(status_code=404, detail="Upload job not found")
     job = upload_jobs[upload_job_id]
