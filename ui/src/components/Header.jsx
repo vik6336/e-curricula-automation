@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 
-export default function Header() {
+export default function Header({ course }) {
   return (
     <motion.header
       initial={{ y: -60, opacity: 0 }}
@@ -28,8 +28,10 @@ export default function Header() {
         </div>
         <div className="hidden sm:flex items-center gap-3">
           <div className="flex flex-col items-end">
-            <span className="text-navy text-sm font-bold">21CSE597T</span>
-            <span className="text-slate-500 text-[11px]">Containers & Cloud DevOps</span>
+            <span className="text-navy text-sm font-bold">{course?.code || "—"}</span>
+            <span className="text-slate-500 text-[11px] max-w-[220px] truncate">
+              {course?.name || "No course selected"}
+            </span>
           </div>
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-60" />

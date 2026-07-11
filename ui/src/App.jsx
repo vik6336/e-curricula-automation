@@ -11,6 +11,7 @@ import DownloadPanel from "./components/DownloadPanel";
 import StatusBadge from "./components/StatusBadge";
 import QuestionBank from "./components/QuestionBank";
 import QuestionEditor from "./components/QuestionEditor";
+import CourseSetup from "./components/CourseSetup";
 import { API, API_KEY, apiFetch, streamJobStatus } from "./lib/api";
 
 const cardVariants = {
@@ -84,6 +85,7 @@ function MainApp() {
   const [jobStatus, setJobStatus] = useState(null);
   const [logs, setLogs] = useState([]);
   const [moduleInfo, setModuleInfo] = useState([]);
+  const [course, setCourse] = useState(null);
   // Human-in-the-loop: professor must confirm they reviewed the content
   const [reviewed, setReviewed] = useState(false);
   // Existing-upload conflicts reported by the automation (awaiting decision)
@@ -92,6 +94,7 @@ function MainApp() {
 
   useEffect(() => {
     fetchModuleInfo();
+    fetchCourse();
   }, []);
 
   async function fetchModuleInfo() {
@@ -99,6 +102,28 @@ function MainApp() {
       const res = await apiFetch("/api/modules");
       if (res.ok) setModuleInfo(await res.json());
     } catch (_) {}
+  }
+
+  async function fetchCourse() {
+    try {
+      const res = await apiFetch("/api/course");
+      if (res.ok) setCourse(await res.json());
+    } catch (_) {}
+  }
+
+  async function saveCourse(code, name) {
+    const res = await apiFetch("/api/course", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, name }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      return { ok: false, error: err.detail || "Could not save course" };
+    }
+    await fetchCourse();
+    await fetchModuleInfo();
+    return { ok: true };
   }
 
   async function handleGenerate() {
@@ -255,10 +280,11 @@ function MainApp() {
       <div className="orb w-80 h-80 bg-maroon/15 top-[30%] right-[-100px] animate-float-slow" />
       <div className="orb w-72 h-72 bg-blue-400/20 bottom-[-60px] left-[30%] animate-float" />
 
-      <Header />
+      <Header course={course} />
       <Hero />
 
-      <div className="max-w-6xl mx-auto px-4 pb-2">
+      <div className="max-w-6xl mx-auto px-4 pb-2 space-y-3">
+        <CourseSetup course={course} onSave={saveCourse} disabled={isBusy} />
         <Stepper jobStatus={jobStatus} hasFile={!!sloFile} hasOutput={hasOutput} />
       </div>
 
@@ -378,7 +404,7 @@ function MainApp() {
           {(logs.length > 0 || isBusy) && (
             <ProgressLog logs={logs} isRunning={isBusy} />
           )}
-          <DownloadPanel moduleInfo={moduleInfo} api={API} apiKey={API_KEY} />
+          <DownloadPanel moduleInfo={moduleInfo} api={API} apiKey={API_KEY} courseCode={course?.code} />
           <QuestionBank
             api={API}
             apiKey={API_KEY}

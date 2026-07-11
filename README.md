@@ -57,7 +57,7 @@ This has to run locally on the professor's machine, not on a server. The portal 
 
 - The free Gemini tier gets rate limited hard on full course runs. Generation checkpoints after every SLO and every session, so an interrupted run resumes where it stopped instead of starting over. A paid tier removes the waiting.
 - The portal enforces upload limits (zips under 1 MB, PDFs under 5 MB) and minimum question counts per session. The generator and the UI both respect these.
-- The course code currently lives in `config/settings.yaml` and in `scripts/upload/portal_upload.py`. Pointing this at another course means updating those two places and supplying that course's SLO document.
+- The app works on one course at a time. Set the course code and name at the top of the page, upload that course's SLO document, and generate. Output is kept in a separate folder per course code, so switching later does not overwrite anything. The 5 module, 9 session, 2 SLO structure is fixed.
 - Generated content is a draft, not a final product. The review step exists because the model does occasionally mark a wrong MCQ answer or write a weak question, and a human should catch that before students see it.
 
 ## Layout

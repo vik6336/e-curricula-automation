@@ -24,9 +24,24 @@ from slowapi.util import get_remote_address
 # ── paths ─────────────────────────────────────────────────────────────────────
 
 PROJECT_ROOT = Path(__file__).parent
-OUTPUT_ROOT = PROJECT_ROOT / "output" / "21CSE597T"
 INPUT_ROOT = PROJECT_ROOT / "input"
 SLO_DOC_DIR = INPUT_ROOT / "slo_documents"
+
+sys.path.insert(0, str(PROJECT_ROOT))
+from scripts.config import load_settings, get_active_course, set_active_course  # noqa: E402
+
+
+def current_course_code() -> str:
+    """Portal code of the active course (defaults to settings.yaml)."""
+    return load_settings()["course"]["code"]
+
+
+def output_root() -> Path:
+    """Output directory for the active course. Generated files are namespaced
+    by course code so switching courses never clobbers another's content."""
+    root = PROJECT_ROOT / "output" / current_course_code()
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 # ── config from environment (fail fast if required vars are missing) ───────────
 
@@ -161,6 +176,38 @@ def _validate_file_content(content: bytes, extension: str) -> None:
 
 
 # ── endpoints ─────────────────────────────────────────────────────────────────
+
+
+@app.get("/api/course", dependencies=[Depends(require_api_key)])
+async def get_course():
+    """The active course. `is_default` is true when none has been set yet."""
+    active = get_active_course()
+    settings = load_settings()
+    return {
+        "code": settings["course"]["code"],
+        "name": settings["course"]["name"],
+        "num_modules": settings["course"]["num_modules"],
+        "sessions_per_module": settings["course"]["sessions_per_module"],
+        "is_default": active is None,
+    }
+
+
+@app.post("/api/course", dependencies=[Depends(require_api_key)])
+@limiter.limit("20/minute")
+async def set_course(request: Request, body: dict):
+    """Set the active course (portal code + display name)."""
+    code = str(body.get("code", "")).strip()
+    name = str(body.get("name", "")).strip()
+    # The code becomes a directory name and a portal identifier — keep it strict.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,32}", code):
+        raise HTTPException(status_code=400,
+                            detail="Course code must be 3–32 chars: letters, digits, _ or -")
+    if not 2 <= len(name) <= 120:
+        raise HTTPException(status_code=400, detail="Course name must be 2–120 characters")
+    course = set_active_course(code, name)
+    output_root()  # create the namespaced output dir up front
+    logger.info("Active course set: %s (%s)", course["code"], course["name"])
+    return {"ok": True, **course}
 
 
 @app.post("/api/upload/slo", dependencies=[Depends(require_api_key)])
@@ -323,7 +370,7 @@ async def start_upload(request: Request, body: dict):
 async def _run_upload(upload_job_id: str, modules: list[int]):
     # Headful + manual login: the browser opens on the professor's screen so
     # they can enter their own credentials and solve the captcha themselves.
-    decision_file = OUTPUT_ROOT.parent / f".upload_decision_{upload_job_id}.json"
+    decision_file = output_root().parent / f".upload_decision_{upload_job_id}.json"
     upload_jobs[upload_job_id]["decision_file"] = str(decision_file)
 
     upload_env = {
@@ -331,6 +378,7 @@ async def _run_upload(upload_job_id: str, modules: list[int]):
         "PORTAL_HEADLESS": "0",
         "PORTAL_MANUAL_LOGIN": "1",
         "PORTAL_PRODUCTION": "1" if PRODUCTION else "0",
+        "PORTAL_COURSE_CODE": current_course_code(),
         # Never silently overwrite the faculty's own uploads: scan first,
         # then pause for their replace/skip decision (relayed via file).
         "PORTAL_ON_CONFLICT": "ask",
@@ -339,7 +387,7 @@ async def _run_upload(upload_job_id: str, modules: list[int]):
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "scripts.upload.portal_upload",
-        "--output-dir", str(OUTPUT_ROOT),
+        "--output-dir", str(output_root()),
         "--modules", *map(str, modules),
         env=upload_env,
         cwd=str(PROJECT_ROOT),
@@ -436,8 +484,8 @@ async def question_info():
     """Which modules have a generated question bank + review PDF."""
     results = []
     for i in range(1, 6):
-        qjson = OUTPUT_ROOT / f"unit_{i}" / "questions.json"
-        qpdf = OUTPUT_ROOT / f"unit_{i}" / f"unit_{i}_question_bank.pdf"
+        qjson = output_root() / f"unit_{i}" / "questions.json"
+        qpdf = output_root() / f"unit_{i}" / f"unit_{i}_question_bank.pdf"
         entry = {"module": i, "has_questions": qjson.exists(), "has_pdf": qpdf.exists()}
         if qjson.exists():
             try:
@@ -455,7 +503,7 @@ async def question_info():
 
 
 def _qbank_paths(module_num: int) -> tuple[Path, Path]:
-    unit_dir = OUTPUT_ROOT / f"unit_{module_num}"
+    unit_dir = output_root() / f"unit_{module_num}"
     return unit_dir / "questions.json", unit_dir / f"unit_{module_num}_question_bank.pdf"
 
 
@@ -589,7 +637,7 @@ async def regenerate_question(request: Request, body: dict):
 async def download_question_pdf(module_num: int):
     if not 1 <= module_num <= 5:
         raise HTTPException(status_code=400, detail="module_num must be 1–5")
-    pdf = OUTPUT_ROOT / f"unit_{module_num}" / f"unit_{module_num}_question_bank.pdf"
+    pdf = output_root() / f"unit_{module_num}" / f"unit_{module_num}_question_bank.pdf"
     if not pdf.exists():
         raise HTTPException(status_code=404, detail="Question bank PDF not found")
     return Response(
@@ -613,7 +661,7 @@ async def publish_questions(request: Request, body: dict):
         raise HTTPException(status_code=400, detail="modules must be integers 1–5")
 
     missing = [m for m in modules
-               if not (OUTPUT_ROOT / f"unit_{m}" / "questions.json").exists()]
+               if not (output_root() / f"unit_{m}" / "questions.json").exists()]
     if missing:
         raise HTTPException(status_code=409,
                             detail=f"No question bank for modules {missing} — generate first")
@@ -628,7 +676,7 @@ async def publish_questions(request: Request, body: dict):
 async def _run_question_publish(upload_job_id: str, modules: list[int]):
     # Same conflict handshake as file uploads: scan the portal's question
     # tables first, pause for the professor's replace/keep decision.
-    decision_file = OUTPUT_ROOT.parent / f".upload_decision_{upload_job_id}.json"
+    decision_file = output_root().parent / f".upload_decision_{upload_job_id}.json"
     upload_jobs[upload_job_id]["decision_file"] = str(decision_file)
 
     upload_env = {
@@ -636,12 +684,13 @@ async def _run_question_publish(upload_job_id: str, modules: list[int]):
         "PORTAL_HEADLESS": "0",
         "PORTAL_MANUAL_LOGIN": "1",
         "PORTAL_PRODUCTION": "1" if PRODUCTION else "0",
+        "PORTAL_COURSE_CODE": current_course_code(),
         "PORTAL_ON_CONFLICT": "ask",
         "UPLOAD_DECISION_FILE": str(decision_file),
     }
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "scripts.upload.portal_upload",
-        "--output-dir", str(OUTPUT_ROOT),
+        "--output-dir", str(output_root()),
         "--modules", *map(str, modules),
         "--questions",
         env=upload_env,
@@ -682,12 +731,24 @@ async def _run_question_publish(upload_job_id: str, modules: list[int]):
 
 @app.get("/api/modules", dependencies=[Depends(require_api_key)])
 async def list_modules():
+    root = output_root()
     results = []
     for i in range(1, 6):
-        ppt_dir = OUTPUT_ROOT / f"unit_{i}" / "ppts"
-        pdf_path = OUTPUT_ROOT / f"unit_{i}" / f"unit_{i}_learning_material.pdf"
+        unit_dir = root / f"unit_{i}"
+        ppt_dir = unit_dir / "ppts"
+        pdf_path = unit_dir / f"unit_{i}_learning_material.pdf"
         ppt_count = len(list(ppt_dir.glob("*.pptx"))) if ppt_dir.exists() else 0
-        results.append({"module": i, "ppt_count": ppt_count, "has_pdf": pdf_path.exists()})
+        # Title comes from generated content when available (course-specific);
+        # the UI falls back to "Module N" before anything is generated.
+        title = ""
+        content_json = unit_dir / "content.json"
+        if content_json.exists():
+            try:
+                title = json.loads(content_json.read_text()).get("module_title", "")
+            except Exception:
+                pass
+        results.append({"module": i, "ppt_count": ppt_count,
+                        "has_pdf": pdf_path.exists(), "title": title})
     return results
 
 
@@ -695,7 +756,7 @@ async def list_modules():
 async def download_module(module_num: int):
     if not 1 <= module_num <= 5:
         raise HTTPException(status_code=400, detail="module_num must be 1–5")
-    unit_dir = OUTPUT_ROOT / f"unit_{module_num}"
+    unit_dir = output_root() / f"unit_{module_num}"
     if not unit_dir.exists():
         raise HTTPException(status_code=404, detail="Module output not found")
 
@@ -721,7 +782,7 @@ async def download_all():
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for i in range(1, 6):
-            unit_dir = OUTPUT_ROOT / f"unit_{i}"
+            unit_dir = output_root() / f"unit_{i}"
             if not unit_dir.exists():
                 continue
             ppt_dir = unit_dir / "ppts"
@@ -735,7 +796,8 @@ async def download_all():
     return Response(
         content=buf.read(),
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=21CSE597T_all_modules.zip"},
+        headers={"Content-Disposition":
+                 f"attachment; filename={current_course_code()}_all_modules.zip"},
     )
 
 

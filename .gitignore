@@ -24,3 +24,6 @@ node_modules/
 
 # Docker temp
 ~$*
+
+# Active course selection (runtime state)
+config/active_course.json

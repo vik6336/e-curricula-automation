@@ -1,13 +1,5 @@
 import { motion } from "framer-motion";
 
-const MODULE_TITLES = {
-  1: "Containers & Docker",
-  2: "Docker Advanced",
-  3: "CI/CD & DevOps",
-  4: "Cloud Platforms",
-  5: "Kubernetes & Multi-Cloud",
-};
-
 // Downloads require the API key — use a fetch+blob approach instead of plain <a href>
 async function downloadWithKey(url, apiKey, filename) {
   const res = await fetch(url, { headers: { "X-API-Key": apiKey } });
@@ -20,7 +12,7 @@ async function downloadWithKey(url, apiKey, filename) {
   URL.revokeObjectURL(a.href);
 }
 
-export default function DownloadPanel({ moduleInfo, api, apiKey }) {
+export default function DownloadPanel({ moduleInfo, api, apiKey, courseCode }) {
   const hasAny = moduleInfo.some((m) => m.ppt_count > 0);
 
   if (!hasAny) return null;
@@ -39,7 +31,7 @@ export default function DownloadPanel({ moduleInfo, api, apiKey }) {
         <motion.button
           whileHover={{ scale: 1.04 }}
           whileTap={{ scale: 0.96 }}
-          onClick={() => downloadWithKey(`${api}/api/download`, apiKey, "21CSE597T_all_modules.zip")}
+          onClick={() => downloadWithKey(`${api}/api/download`, apiKey, `${courseCode || "course"}_all_modules.zip`)}
           className="text-sm bg-gradient-to-r from-navy to-navy-light text-white px-4 py-1.5 rounded-xl font-semibold shadow-glass"
         >
           ↓ Download All
@@ -60,7 +52,7 @@ export default function DownloadPanel({ moduleInfo, api, apiKey }) {
             >
               <div>
                 <p className="text-sm font-semibold text-slate-800">Module {m.module}</p>
-                <p className="text-xs text-slate-500">{MODULE_TITLES[m.module]}</p>
+                <p className="text-xs text-slate-500">{m.title || `Module ${m.module} content`}</p>
               </div>
               <div className="flex items-center gap-3">
                 <div className="flex gap-1.5 text-[11px] font-semibold">

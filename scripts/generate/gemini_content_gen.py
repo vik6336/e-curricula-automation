@@ -22,10 +22,7 @@ from .prompt_templates import (
 load_dotenv(Path(__file__).parent.parent.parent / "config" / ".env")
 
 
-def load_settings() -> dict:
-    settings_path = Path(__file__).parent.parent.parent / "config" / "settings.yaml"
-    with open(settings_path) as f:
-        return yaml.safe_load(f)
+from scripts.config import load_settings  # noqa: E402  (active-course aware)
 
 
 def init_gemini(api_key: str = None) -> genai.GenerativeModel:

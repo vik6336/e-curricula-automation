@@ -5,22 +5,15 @@ import sys
 import argparse
 from pathlib import Path
 
-import yaml
-
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from scripts.config import load_settings
 from scripts.ingest.parse_slo_document import parse_slo_document, validate_parsed_data
 from scripts.ingest.extract_text import extract_all_sources, extract_from_pdf
 from scripts.generate.gemini_content_gen import init_gemini, generate_module_content
 from scripts.build.create_ppt import create_module_ppts
 from scripts.build.create_pdf import create_module_pdf
-
-
-def load_settings():
-    settings_path = Path(__file__).parent.parent / "config" / "settings.yaml"
-    with open(settings_path) as f:
-        return yaml.safe_load(f)
 
 
 def run_pipeline(

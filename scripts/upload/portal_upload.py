@@ -28,7 +28,8 @@ from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 # ── config from environment ───────────────────────────────────────────────────
 
 PORTAL_URL = "https://dld.srmist.edu.in/etecurricula/#/"
-COURSE_CODE = "21CSE597T"
+# Set by the server per active course; falls back to the original course.
+COURSE_CODE = os.environ.get("PORTAL_COURSE_CODE", "21CSE597T")
 
 HEADLESS: bool = os.environ.get("PORTAL_HEADLESS", "1") != "0"
 PRODUCTION: bool = os.environ.get("PORTAL_PRODUCTION", "0") == "1"

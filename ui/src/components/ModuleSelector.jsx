@@ -1,13 +1,5 @@
 import { motion } from "framer-motion";
 
-const MODULE_TITLES = {
-  1: "Containers & Docker",
-  2: "Docker Advanced",
-  3: "CI/CD & DevOps",
-  4: "Cloud Platforms",
-  5: "Kubernetes & Multi-Cloud",
-};
-
 export default function ModuleSelector({ selected, onChange, moduleInfo, disabled }) {
   function toggle(num) {
     if (disabled) return;
@@ -18,6 +10,10 @@ export default function ModuleSelector({ selected, onChange, moduleInfo, disable
 
   function getInfo(num) {
     return moduleInfo.find((m) => m.module === num);
+  }
+
+  function moduleTitle(num) {
+    return getInfo(num)?.title || `Module ${num} content`;
   }
 
   return (
@@ -55,7 +51,7 @@ export default function ModuleSelector({ selected, onChange, moduleInfo, disable
               <p className={`text-sm font-semibold ${isSelected ? "text-navy" : "text-slate-700"}`}>
                 Module {num}
               </p>
-              <p className="text-xs text-slate-500 truncate">{MODULE_TITLES[num]}</p>
+              <p className="text-xs text-slate-500 truncate">{moduleTitle(num)}</p>
             </div>
             {isDone && (
               <span className="text-[11px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex-shrink-0 font-semibold">
