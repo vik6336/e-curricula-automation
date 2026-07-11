@@ -4,10 +4,94 @@
 
 body {
   margin: 0;
-  font-family: 'Segoe UI', system-ui, sans-serif;
-  background: #f1f5f9;
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  background: #f4f7fc;
+  overflow-x: hidden;
 }
 
 #root {
   min-height: 100vh;
 }
+
+/* ── animated gradient mesh background ─────────────────────────────────── */
+.mesh-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(at 15% 20%, rgba(27, 54, 93, 0.10) 0, transparent 50%),
+    radial-gradient(at 85% 10%, rgba(200, 16, 46, 0.07) 0, transparent 50%),
+    radial-gradient(at 75% 85%, rgba(59, 130, 246, 0.10) 0, transparent 50%),
+    radial-gradient(at 25% 90%, rgba(147, 112, 219, 0.08) 0, transparent 50%),
+    linear-gradient(160deg, #f8fafd 0%, #eef3fa 50%, #f4f0f7 100%);
+}
+
+.orb {
+  position: fixed;
+  border-radius: 9999px;
+  filter: blur(90px);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* ── glass surfaces ────────────────────────────────────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+}
+
+.glass-deep {
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+/* ── gradient text ─────────────────────────────────────────────────────── */
+.text-gradient {
+  background: linear-gradient(90deg, #1b365d 0%, #3b5f96 35%, #c8102e 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: gradient-shift 6s ease infinite;
+}
+
+@keyframes gradient-shift {
+  0%, 100% { background-position: 0% center; }
+  50% { background-position: 100% center; }
+}
+
+/* ── shimmer sweep on primary buttons ──────────────────────────────────── */
+.btn-shine {
+  position: relative;
+  overflow: hidden;
+}
+.btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 40%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  animation: shine-sweep 2.8s ease-in-out infinite;
+}
+@keyframes shine-sweep {
+  0% { background-position: 200% 0; }
+  60%, 100% { background-position: -200% 0; }
+}
+
+/* ── slim scrollbars ───────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(27, 54, 93, 0.18);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(27, 54, 93, 0.32); }

@@ -12,7 +12,11 @@ import yaml
 from dotenv import load_dotenv
 from google.api_core.exceptions import DeadlineExceeded, ResourceExhausted, ServiceUnavailable
 
-from .prompt_templates import PDF_CONSOLIDATION_PROMPT, SLO_CONTENT_PROMPT
+from .prompt_templates import (
+    LM_REFERENCES_PROMPT,
+    PDF_CONSOLIDATION_PROMPT,
+    SLO_CONTENT_PROMPT,
+)
 
 # Load environment variables
 load_dotenv(Path(__file__).parent.parent.parent / "config" / ".env")
@@ -228,6 +232,45 @@ def generate_pdf_content(
                 print(f"  Malformed JSON (PDF) — retrying API call (attempt {parse_attempt + 1}/4)...",
                       file=sys.stderr)
                 time.sleep(10)
+
+
+def generate_lm_references(
+    model: genai.GenerativeModel,
+    module_num: int,
+    module_data: dict,
+) -> dict:
+    """Generate the references-only Learning Material content for a module.
+
+    Faculty guidance (2026-07-03): the LM PDF should be a reference sheet —
+    book references + curated links — not a full narrative document.
+    """
+    settings = load_settings()
+    session_topics = "\n".join(
+        f"  - Session {s['session']}: {s['slo_1']}" for s in module_data["sessions"]
+    )
+    prompt = LM_REFERENCES_PROMPT.format(
+        course_code=settings["course"]["code"],
+        course_name=settings["course"]["name"],
+        module_num=module_num,
+        module_title=module_data["title"],
+        session_topics=session_topics,
+    )
+    generation_config = genai.GenerationConfig(
+        temperature=0.2,  # low — reference accuracy matters more than creativity
+        max_output_tokens=8192,
+        response_mime_type="application/json",
+    )
+    for parse_attempt in range(3):
+        response = _call_with_retry(model, prompt, generation_config)
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            if parse_attempt == 2:
+                raise
+            time.sleep(10)
 
 
 def generate_module_content(

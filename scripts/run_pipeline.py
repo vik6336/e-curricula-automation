@@ -23,12 +23,18 @@ def load_settings():
         return yaml.safe_load(f)
 
 
-def run_pipeline(modules_to_process: list[int] = None, skip_upload: bool = True):
+def run_pipeline(
+    modules_to_process: list[int] = None,
+    skip_upload: bool = True,
+    slo_doc: str = None,
+):
     """Run the full content generation pipeline.
 
     Args:
         modules_to_process: List of module numbers (1-5) to process. Default: all.
         skip_upload: If True, skip the portal upload step.
+        slo_doc: Path to the SLO/SRO document to use. Default: the path in
+            settings.yaml. Used by the server to inject a freshly uploaded file.
     """
     settings = load_settings()
     project_root = Path(__file__).parent.parent
@@ -41,7 +47,17 @@ def run_pipeline(modules_to_process: list[int] = None, skip_upload: bool = True)
     print("Step 1: Parsing SLO/SRO document...")
     print("=" * 60)
 
-    slo_path = project_root / settings["paths"]["slo_document"]
+    if slo_doc:
+        slo_path = Path(slo_doc)
+        if not slo_path.is_absolute():
+            slo_path = project_root / slo_path
+    else:
+        slo_path = project_root / settings["paths"]["slo_document"]
+
+    if not slo_path.exists():
+        print(f"SLO document not found: {slo_path}")
+        sys.exit(1)
+    print(f"  Using SLO document: {slo_path}")
     slo_data = parse_slo_document(str(slo_path))
     errors = validate_parsed_data(slo_data)
 
@@ -116,14 +132,25 @@ def run_pipeline(modules_to_process: list[int] = None, skip_upload: bool = True)
         if checkpoint.exists():
             checkpoint.unlink()
 
-        # --- Step 5: Generate PDF ---
-        print(f"\n  Generating PDF for Module {module_num}...")
+        # --- Step 5: Generate Learning Material PDF ---
+        # Faculty guidance: LM should be a references sheet (books + links),
+        # not a narrative document. Falls back to the narrative PDF on failure.
+        print(f"\n  Generating Learning Material (references) for Module {module_num}...")
         pdf_path = output_dir / f"unit_{module_num}" / f"unit_{module_num}_learning_material.pdf"
         try:
-            create_module_pdf(module_content["pdf_content"], module_num, str(pdf_path))
-            print(f"  Created PDF: {pdf_path}")
+            from scripts.build.create_pdf import create_references_pdf
+            from scripts.generate.gemini_content_gen import generate_lm_references
+            refs = generate_lm_references(model, module_num, slo_data[module_key])
+            create_references_pdf(refs, module_num, str(pdf_path))
+            print(f"  Created references PDF: {pdf_path}")
         except Exception as e:
-            print(f"  WARNING: PDF creation failed ({e}). PPTs are saved.", file=sys.stderr)
+            print(f"  WARNING: references PDF failed ({e}) — using narrative fallback.",
+                  file=sys.stderr)
+            try:
+                create_module_pdf(module_content["pdf_content"], module_num, str(pdf_path))
+                print(f"  Created PDF (narrative fallback): {pdf_path}")
+            except Exception as e2:
+                print(f"  WARNING: PDF creation failed ({e2}). PPTs are saved.", file=sys.stderr)
 
     # --- Step 6: Upload (optional) ---
     if not skip_upload:
@@ -155,9 +182,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Upload generated files to the e-curricula portal",
     )
+    parser.add_argument(
+        "--slo-doc",
+        help="Path to the SLO/SRO document (default: the one in settings.yaml)",
+    )
     args = parser.parse_args()
 
     run_pipeline(
         modules_to_process=args.modules,
         skip_upload=not args.upload,
+        slo_doc=args.slo_doc,
     )

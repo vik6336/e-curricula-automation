@@ -250,3 +250,127 @@ Return ONLY valid JSON:
   ],
   "conclusion": "Module conclusion text..."
 }}"""
+
+
+QUESTION_GEN_PROMPT = """You are an expert educator creating assessment questions for an Indian university engineering course, following Outcome-Based Education (OBE) standards.
+
+## Course Context
+- **Course**: {course_code} — {course_name}
+- **Module {module_num}**: {module_title}
+- **Session {session_num}**
+- **SLO 1**: {slo_1}
+- **SLO 2**: {slo_2}
+
+## Task
+Create assessment questions for THIS SESSION covering both SLOs:
+- **5 multiple choice questions** (4 options each, exactly one correct)
+- **2 short-answer questions** (expected answer: 4-6 sentences)
+- **1 long-answer question** (expected answer: structured, 250-400 words)
+
+## Rules
+1. Questions must be answerable from the session's SLO topics alone.
+2. Vary Bloom's levels: include at least one level-1/2 (remember/understand) and at least one level-3+ (apply/analyze) question.
+3. `taxonomy_verb` MUST be exactly one word from this list (match the question's cognitive action):
+   Choose, Count, Cite, Define, Describe, Distinguish, Draw, Find, Group, Identify, Know, Label, List, Listen, Locate, Match, Memorize, Name, Outline, Quote, Read, Repeat, Recall, Recite, Relate, Review, Recognize, Record, Reproduce, Select, State, Sequence, Show, Sort, Tell, Underline, Write
+4. `blooms_level` / `level` is an integer 1-6 (1=Remember, 2=Understand, 3=Apply, 4=Analyze, 5=Evaluate, 6=Create).
+5. `program_outcomes` is a list of 1-2 integers from [1, 2, 3] (PO1=Engineering Knowledge, PO2=Problem Analysis, PO3=Design/Development).
+6. MCQ distractors must be plausible — no joke options.
+7. Answers must be technically accurate and complete.
+
+## Output Format
+Return ONLY valid JSON:
+{{
+  "mcqs": [
+    {{
+      "question": "Question text?",
+      "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+      "correct_option": 1,
+      "blooms_level": 2,
+      "taxonomy_verb": "Identify",
+      "program_outcomes": [1]
+    }}
+  ],
+  "short_questions": [
+    {{
+      "question": "Question text?",
+      "answer": "Model answer, 4-6 sentences.",
+      "level": 2,
+      "taxonomy_verb": "Describe",
+      "program_outcomes": [1, 2]
+    }}
+  ],
+  "long_questions": [
+    {{
+      "question": "Question text?",
+      "answer": "Structured model answer with key points.",
+      "level": 4,
+      "taxonomy_verb": "Outline",
+      "program_outcomes": [2]
+    }}
+  ]
+}}"""
+
+
+LM_REFERENCES_PROMPT = """You are a university course librarian creating a Learning Material reference sheet for an engineering course module.
+
+## Course Context
+- **Course**: {course_code} — {course_name}
+- **Module {module_num}**: {module_title}
+- **Session topics**:
+{session_topics}
+
+## Task
+Create a curated reference document for this module: book references and web
+resources students should use. This is a REFERENCE SHEET, not a textbook —
+keep descriptions short and practical.
+
+## Rules
+1. Book references: 4-6 real, well-known textbooks relevant to the module topics.
+   Use accurate titles/authors/publishers — standard texts only, no invented books.
+2. Web resources: 8-12 links. ONLY stable, well-known URLs: official documentation
+   home pages (docs.docker.com, kubernetes.io/docs), official tutorials, and major
+   learning platforms. NO deep links to blog posts; NO invented URLs.
+3. Per-session pointers: for each session, one line pointing students to the most
+   relevant reference(s).
+4. Keep the overview to ~100 words.
+
+## Output Format
+Return ONLY valid JSON:
+{{
+  "module_title": "{module_title}",
+  "overview": "What this module covers and how to use these references...",
+  "book_references": [
+    {{"title": "Book Title", "authors": "Author A, Author B", "publisher_year": "Publisher, Year", "relevance": "Which module topics it covers"}}
+  ],
+  "web_resources": [
+    {{"title": "Resource name", "url": "https://...", "type": "Official Docs|Tutorial|Video Course|Tool", "description": "One line on what it offers"}}
+  ],
+  "session_pointers": [
+    {{"session": 1, "topic": "Session topic", "reading": "Chapter/resource pointer"}}
+  ]
+}}"""
+
+
+QUESTION_REGEN_PROMPT = """You are revising ONE assessment question for an Indian university engineering course (OBE standards).
+
+## Course Context
+- **Course**: {course_code} — {course_name}
+- **Module {module_num}**: {module_title}
+- **Question type**: {kind_label}
+
+## Existing Question (to be replaced)
+{existing_question}
+
+## Faculty Feedback
+{feedback}
+
+## Rules
+1. Produce ONE replacement question of the same type, addressing the feedback.
+2. `taxonomy_verb` MUST be exactly one word from:
+   Choose, Count, Cite, Define, Describe, Distinguish, Draw, Find, Group, Identify, Know, Label, List, Listen, Locate, Match, Memorize, Name, Outline, Quote, Read, Repeat, Recall, Recite, Relate, Review, Recognize, Record, Reproduce, Select, State, Sequence, Show, Sort, Tell, Underline, Write
+3. Bloom's level / level is an integer 1-6. `program_outcomes` ⊆ [1, 2, 3].
+4. MCQs: exactly 4 plausible options, one correct. Short/long: include a model answer.
+5. Stay on the same topic as the original unless the feedback says otherwise.
+
+## Output Format
+Return ONLY valid JSON — a single question object with EXACTLY the same keys as the existing question shown above."""

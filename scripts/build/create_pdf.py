@@ -204,3 +204,74 @@ if __name__ == "__main__":
 
     path = create_module_pdf(pdf_content, int(sys.argv[2]), sys.argv[3])
     print(path)
+
+
+# ── references-style learning material (faculty request 2026-07-03) ───────────
+# "All PDF with links or one document is enough" — a per-unit reference sheet:
+# book references + curated web links + per-session reading pointers.
+
+def create_references_pdf(data: dict, module_num: int, output_path: str) -> str:
+    from xml.sax.saxutils import escape as _e, quoteattr as _qa
+
+    styles = _get_styles()
+    story = []
+
+    story.append(Paragraph(f"Module {module_num}: {_e(str(data.get('module_title', '')))}",
+                           styles["ModuleTitle"]))
+    story.append(Paragraph("Learning Material — References & Further Reading",
+                           styles["SessionTitle"]))
+    story.append(Spacer(1, 0.15 * inch))
+    if data.get("overview"):
+        story.append(Paragraph(_e(str(data["overview"])), styles["BodyText"]))
+        story.append(Spacer(1, 0.2 * inch))
+
+    story.append(Paragraph("Book References", styles["SessionTitle"]))
+    for i, b in enumerate(data.get("book_references", []), 1):
+        story.append(Paragraph(
+            f"<b>{i}. {_e(str(b.get('title', '')))}</b> — {_e(str(b.get('authors', '')))} "
+            f"({_e(str(b.get('publisher_year', '')))})", styles["BodyText"]))
+        if b.get("relevance"):
+            story.append(Paragraph(f"<i>{_e(str(b['relevance']))}</i>", styles["BodyText"]))
+        story.append(Spacer(1, 4))
+
+    story.append(Spacer(1, 0.15 * inch))
+    story.append(Paragraph("Web Resources", styles["SessionTitle"]))
+    for r in data.get("web_resources", []):
+        url = str(r.get("url", ""))
+        story.append(Paragraph(
+            f"<b>{_e(str(r.get('title', '')))}</b> [{_e(str(r.get('type', '')))}] — "
+            f"<link href={_qa(url)} color='blue'>{_e(url)}</link>",
+            styles["BodyText"]))
+        if r.get("description"):
+            story.append(Paragraph(_e(str(r["description"])), styles["BodyText"]))
+        story.append(Spacer(1, 4))
+
+    pointers = data.get("session_pointers", [])
+    if pointers:
+        story.append(Spacer(1, 0.15 * inch))
+        story.append(Paragraph("Session-wise Reading Guide", styles["SessionTitle"]))
+        rows = [["Session", "Topic", "Suggested Reading"]] + [
+            [str(p.get("session", "")),
+             Paragraph(_e(str(p.get("topic", ""))), styles["BodyText"]),
+             Paragraph(_e(str(p.get("reading", ""))), styles["BodyText"])]
+            for p in pointers
+        ]
+        table = Table(rows, colWidths=[0.8 * inch, 2.4 * inch, 3.6 * inch])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), COLOR_PRIMARY),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#CCCCCC")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, COLOR_LIGHT_BG]),
+        ]))
+        story.append(table)
+
+    doc = SimpleDocTemplate(
+        output_path, pagesize=A4,
+        leftMargin=0.7 * inch, rightMargin=0.7 * inch,
+        topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+        title=f"Module {module_num} Learning Material — References",
+    )
+    doc.build(story)
+    return output_path

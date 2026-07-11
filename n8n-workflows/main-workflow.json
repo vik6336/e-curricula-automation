@@ -5,7 +5,9 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "generate-curriculum",
-        "responseMode": "lastNode",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "responseData": "firstEntryJson",
         "options": {}
       },
       "id": "webhook-trigger",
@@ -13,11 +15,17 @@
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
       "position": [240, 400],
-      "webhookId": "curricul-ai-trigger"
+      "webhookId": "curricul-ai-trigger",
+      "credentials": {
+        "headerAuth": {
+          "id": "webhook-header-auth",
+          "name": "CurriculAI Webhook Auth"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const body = $input.first().json.body || {};\nconst modules = body.modules || [1, 2, 3, 4, 5];\nconst slo_filename = body.slo_filename || 'SLO_SRO_Containers_Cloud_DevOps.docx';\n\nreturn [{\n  json: {\n    modules: modules,\n    modules_str: modules.join(','),\n    slo_filename: slo_filename,\n    started_at: new Date().toISOString(),\n    api_base: 'http://localhost:8000'\n  }\n}];"
+        "jsCode": "const body = $input.first().json.body || {};\nconst modules = body.modules || [1, 2, 3, 4, 5];\nconst slo_filename = body.slo_filename || 'SLO_SRO_Containers_Cloud_DevOps.docx';\nconst session_id = body.session_id || '';\n\nreturn [{\n  json: {\n    modules: modules,\n    modules_str: modules.join(','),\n    slo_filename: slo_filename,\n    session_id: session_id,\n    started_at: new Date().toISOString(),\n    api_base: 'http://host.docker.internal:8000'\n  }\n}];"
       },
       "id": "config-node",
       "name": "⚙️ Extract Config",
@@ -29,6 +37,8 @@
       "parameters": {
         "method": "POST",
         "url": "={{ $json.api_base }}/api/generate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "form-urlencoded",
         "bodyParameters": {
@@ -36,6 +46,10 @@
             {
               "name": "modules",
               "value": "={{ $json.modules_str }}"
+            },
+            {
+              "name": "slo_doc",
+              "value": "={{ $json.slo_filename }}"
             }
           ]
         },
@@ -45,11 +59,17 @@
       "name": "🚀 Start Generation",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [760, 400]
+      "position": [760, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-key",
+          "name": "CurriculAI API Key"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const job_id = $input.first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\n\nif (!job_id) throw new Error('No job_id returned from generate endpoint');\n\nreturn [{\n  json: {\n    job_id: job_id,\n    api_base: api_base,\n    poll_url: `${api_base}/api/status/${job_id}`,\n    check_count: 0\n  }\n}];"
+        "jsCode": "const job_id = $input.first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst session_id = $('⚙️ Extract Config').first().json.session_id;\nconst modules = $('⚙️ Extract Config').first().json.modules;\n\nif (!job_id) throw new Error('No job_id returned from generate endpoint');\n\nreturn [{\n  json: {\n    job_id: job_id,\n    api_base: api_base,\n    session_id: session_id,\n    modules: modules,\n    poll_url: `${api_base}/api/job/${job_id}`\n  }\n}];"
       },
       "id": "store-job",
       "name": "📝 Store Job ID",
@@ -66,29 +86,60 @@
       "name": "⏳ Wait 30s",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [1280, 400]
+      "position": [1280, 400],
+      "webhookId": "wait-resume"
     },
     {
       "parameters": {
         "method": "GET",
         "url": "={{ $('📝 Store Job ID').first().json.poll_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": { "timeout": 15000 }
       },
       "id": "poll-status",
       "name": "🔍 Poll Job Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1540, 400]
+      "position": [1540, 400],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-key",
+          "name": "CurriculAI API Key"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json;\nconst body = typeof raw === 'string' ? raw : JSON.stringify(raw);\nconst lines = body.split('\\n');\nlet status = 'running';\nlet lastLog = '';\n\nfor (const line of lines) {\n  if (line.startsWith('data: ')) {\n    try {\n      const event = JSON.parse(line.slice(6));\n      if (event.type === 'status') status = event.status;\n      if (event.type === 'log') lastLog = event.line;\n    } catch(_) {}\n  }\n}\n\nconst job_id = $('📝 Store Job ID').first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\n\nreturn [{\n  json: {\n    status,\n    last_log: lastLog,\n    job_id,\n    api_base,\n    poll_url: `${api_base}/api/status/${job_id}`\n  }\n}];"
+        "jsCode": "const raw = $input.first().json;\nconst status = raw.status || 'running';\nconst lastLog = raw.last_log || '';\nconst job_id = $('📝 Store Job ID').first().json.job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst session_id = $('⚙️ Extract Config').first().json.session_id;\nconst modules = $('⚙️ Extract Config').first().json.modules;\n\nreturn [{\n  json: {\n    status,\n    last_log: lastLog,\n    job_id,\n    api_base,\n    session_id,\n    modules,\n    poll_url: `${api_base}/api/job/${job_id}`\n  }\n}];"
       },
       "id": "parse-status",
       "name": "📊 Parse Status",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1800, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            {
+              "id": "cond-gen-error",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "error",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-gen-error",
+      "name": "❓ Gen Errored?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2060, 400]
     },
     {
       "parameters": {
@@ -110,7 +161,82 @@
       "name": "✅ Done?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2060, 300]
+      "position": [2320, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('⚙️ Extract Config').first().json.api_base }}/api/upload",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ modules: $('⚙️ Extract Config').first().json.modules }) }}",
+        "options": { "timeout": 15000 }
+      },
+      "id": "trigger-upload",
+      "name": "📤 Trigger Portal Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3360, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-key",
+          "name": "CurriculAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const upload_job_id = $input.first().json.upload_job_id;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\n\nif (!upload_job_id) throw new Error('No upload_job_id returned');\n\nreturn [{\n  json: {\n    upload_job_id,\n    upload_poll_url: `${api_base}/api/upload-job/${upload_job_id}`,\n    api_base\n  }\n}];"
+      },
+      "id": "store-upload-job",
+      "name": "📝 Store Upload Job ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3620, 200]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "upload-wait-node",
+      "name": "⏳ Upload Wait 30s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [3880, 200],
+      "webhookId": "upload-wait-resume"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('📝 Store Upload Job ID').first().json.upload_poll_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": { "timeout": 15000 }
+      },
+      "id": "poll-upload-status",
+      "name": "🔍 Poll Upload Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4140, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fastapi-key",
+          "name": "CurriculAI API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\nconst status = raw.status || 'running';\nconst upload_job_id = $('📝 Store Upload Job ID').first().json.upload_job_id;\nconst upload_poll_url = $('📝 Store Upload Job ID').first().json.upload_poll_url;\nconst api_base = $('📝 Store Upload Job ID').first().json.api_base;\n\nreturn [{ json: { status, upload_job_id, upload_poll_url, api_base, last_log: raw.last_log || '' } }];"
+      },
+      "id": "parse-upload-status",
+      "name": "📊 Parse Upload Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4400, 200]
     },
     {
       "parameters": {
@@ -118,7 +244,7 @@
           "options": { "caseSensitive": true },
           "conditions": [
             {
-              "id": "cond-error",
+              "id": "cond-upload-error",
               "leftValue": "={{ $json.status }}",
               "rightValue": "error",
               "operator": { "type": "string", "operation": "equals" }
@@ -128,104 +254,63 @@
         },
         "options": {}
       },
-      "id": "check-error",
-      "name": "❌ Error?",
+      "id": "check-upload-error",
+      "name": "❓ Upload Errored?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2060, 560]
+      "position": [4660, 200]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $('⚙️ Extract Config').first().json.api_base }}/api/modules",
+        "conditions": {
+          "options": { "caseSensitive": true },
+          "conditions": [
+            {
+              "id": "cond-upload-done",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "done",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
         "options": {}
       },
-      "id": "get-modules",
-      "name": "📂 Get Module Info",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2320, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "const modules = $input.first().json;\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst ready = modules.filter(m => m.ppt_count > 0);\n\nreturn ready.map(m => ({\n  json: {\n    module_num: m.module,\n    ppt_count: m.ppt_count,\n    has_pdf: m.has_pdf,\n    api_base: api_base,\n    download_url: `${api_base}/api/download/${m.module}`\n  }\n}));"
-      },
-      "id": "split-modules",
-      "name": "🔀 Split Per Module",
-      "type": "n8n-nodes-base.code",
+      "id": "check-upload-done",
+      "name": "✅ Upload Done?",
+      "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [2580, 200]
+      "position": [4920, 200]
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $json.download_url }}",
-        "options": {
-          "response": {
-            "response": { "responseFormat": "file" }
-          }
-        }
-      },
-      "id": "download-module",
-      "name": "⬇️ Download Module ZIP",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [2840, 200]
-    },
-    {
-      "parameters": {
-        "mode": "append",
-        "options": {}
-      },
-      "id": "merge-results",
-      "name": "🗂️ Merge All ZIPs",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [3100, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "const items = $input.all();\nconst api_base = $('⚙️ Extract Config').first().json.api_base;\nconst started_at = $('⚙️ Extract Config').first().json.started_at;\nconst finished_at = new Date().toISOString();\nconst total_ppts = items.reduce((sum, i) => sum + (i.json.ppt_count || 0), 0);\nconst total_pdfs = items.filter(i => i.json.has_pdf).length;\n\nreturn [{\n  json: {\n    status: 'complete',\n    summary: {\n      modules_processed: items.length,\n      total_ppts_generated: total_ppts,\n      total_pdfs_generated: total_pdfs,\n      download_all_url: `${api_base}/api/download`,\n      started_at,\n      finished_at\n    },\n    message: `CurriculAI complete! ${total_ppts} PPTs and ${total_pdfs} PDFs generated across ${items.length} modules.`\n  }\n}];"
+        "jsCode": "const started_at = $('⚙️ Extract Config').first().json.started_at;\nconst finished_at = new Date().toISOString();\n\nreturn [{\n  json: {\n    status: 'complete',\n    message: 'CurriculAI complete! Content generated AND uploaded to eCurricula portal.',\n    started_at,\n    finished_at\n  }\n}];"
       },
       "id": "summary-node",
       "name": "📋 Pipeline Summary",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [3360, 200]
+      "position": [5180, 100]
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
-        "options": { "responseCode": 200 }
-      },
-      "id": "respond-success",
-      "name": "✅ Respond Success",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [3620, 200]
-    },
-    {
-      "parameters": {
-        "jsCode": "return [{\n  json: {\n    status: 'error',\n    message: 'Pipeline failed. Check FastAPI logs.',\n    job_id: $json.job_id,\n    last_log: $json.last_log\n  }\n}];"
+        "jsCode": "return [{\n  json: {\n    status: 'error',\n    message: 'Generation pipeline failed. Check FastAPI logs.',\n    job_id: $json.job_id,\n    last_log: $json.last_log\n  }\n}];"
       },
       "id": "error-node",
-      "name": "🚨 Handle Error",
+      "name": "🚨 Handle Gen Error",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2320, 640]
+      "position": [2320, 600]
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify($json) }}",
-        "options": { "responseCode": 500 }
+        "jsCode": "return [{\n  json: {\n    status: 'upload_error',\n    message: 'Portal upload failed. Check FastAPI logs.',\n    upload_job_id: $json.upload_job_id,\n    last_log: $json.last_log\n  }\n}];"
       },
-      "id": "respond-error",
-      "name": "❌ Respond Error",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [2580, 640]
+      "id": "upload-error-node",
+      "name": "🚨 Handle Upload Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5180, 320]
     }
   ],
   "connections": {
@@ -248,41 +333,49 @@
       "main": [[{ "node": "📊 Parse Status", "type": "main", "index": 0 }]]
     },
     "📊 Parse Status": {
+      "main": [[{ "node": "❓ Gen Errored?", "type": "main", "index": 0 }]]
+    },
+    "❓ Gen Errored?": {
       "main": [
-        [{ "node": "✅ Done?", "type": "main", "index": 0 }],
-        [{ "node": "❌ Error?", "type": "main", "index": 0 }]
+        [{ "node": "🚨 Handle Gen Error", "type": "main", "index": 0 }],
+        [{ "node": "✅ Done?", "type": "main", "index": 0 }]
       ]
     },
     "✅ Done?": {
       "main": [
-        [{ "node": "📂 Get Module Info", "type": "main", "index": 0 }],
+        [{ "node": "📤 Trigger Portal Upload", "type": "main", "index": 0 }],
         [{ "node": "⏳ Wait 30s", "type": "main", "index": 0 }]
       ]
     },
-    "❌ Error?": {
+    "📤 Trigger Portal Upload": {
+      "main": [[{ "node": "📝 Store Upload Job ID", "type": "main", "index": 0 }]]
+    },
+    "📝 Store Upload Job ID": {
+      "main": [[{ "node": "⏳ Upload Wait 30s", "type": "main", "index": 0 }]]
+    },
+    "⏳ Upload Wait 30s": {
+      "main": [[{ "node": "🔍 Poll Upload Status", "type": "main", "index": 0 }]]
+    },
+    "🔍 Poll Upload Status": {
+      "main": [[{ "node": "📊 Parse Upload Status", "type": "main", "index": 0 }]]
+    },
+    "📊 Parse Upload Status": {
+      "main": [[{ "node": "❓ Upload Errored?", "type": "main", "index": 0 }]]
+    },
+    "❓ Upload Errored?": {
       "main": [
-        [{ "node": "🚨 Handle Error", "type": "main", "index": 0 }],
-        [{ "node": "⏳ Wait 30s", "type": "main", "index": 0 }]
+        [{ "node": "🚨 Handle Upload Error", "type": "main", "index": 0 }],
+        [{ "node": "✅ Upload Done?", "type": "main", "index": 0 }]
       ]
     },
-    "📂 Get Module Info": {
-      "main": [[{ "node": "🔀 Split Per Module", "type": "main", "index": 0 }]]
+    "✅ Upload Done?": {
+      "main": [
+        [{ "node": "📋 Pipeline Summary", "type": "main", "index": 0 }],
+        [{ "node": "⏳ Upload Wait 30s", "type": "main", "index": 0 }]
+      ]
     },
-    "🔀 Split Per Module": {
-      "main": [[{ "node": "⬇️ Download Module ZIP", "type": "main", "index": 0 }]]
-    },
-    "⬇️ Download Module ZIP": {
-      "main": [[{ "node": "🗂️ Merge All ZIPs", "type": "main", "index": 0 }]]
-    },
-    "🗂️ Merge All ZIPs": {
-      "main": [[{ "node": "📋 Pipeline Summary", "type": "main", "index": 0 }]]
-    },
-    "📋 Pipeline Summary": {
-      "main": [[{ "node": "✅ Respond Success", "type": "main", "index": 0 }]]
-    },
-    "🚨 Handle Error": {
-      "main": [[{ "node": "❌ Respond Error", "type": "main", "index": 0 }]]
-    }
+    "🚨 Handle Gen Error": { "main": [] },
+    "🚨 Handle Upload Error": { "main": [] }
   },
   "settings": {
     "executionOrder": "v1",
